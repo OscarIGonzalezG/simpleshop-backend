@@ -1,98 +1,140 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🚀 SimpleShop - SaaS Backend Multi-Tenant
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+![NestJS](https://img.shields.io/badge/nestjs-%23E0234E.svg?style=for-the-badge&logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
+![Postgres](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**SimpleShop** es una plataforma SaaS (Software as a Service) diseñada para ayudar a pequeñas empresas (Pymes) a resolver dos problemas clave: **Gestión de Inventario** y **Presencia Digital**.
 
-## Description
+Este repositorio contiene el **Backend Core**, construido con una arquitectura robusta que permite a múltiples tiendas operar en una sola instancia de forma segura y aislada.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## 🏛️ Arquitectura & Decisiones Técnicas
 
+Este no es un backend CRUD tradicional. Implementa una arquitectura **Multi-Tenant Real** (Single Database / Logical Isolation).
+
+### 🔥 Key Features Técnicos:
+* **Aislamiento Automático de Datos:** Implementación de `BaseTenantService` y `BaseTenantController`. Los desarrolladores no necesitan filtrar manualmente por `tenantId`; el sistema lo inyecta automáticamente desde el contexto de la petición (JWT).
+* **Request Context:** Uso de `AsyncLocalStorage` para manejar el contexto del usuario y del tenant a través de toda la cadena de la petición.
+* **Inventario Transaccional:** Uso de `QueryRunner` y transacciones de base de datos para asegurar la integridad del stock (Atomicidad en movimientos de entrada/salida).
+* **Seguridad Basada en Roles:** Decoradores personalizados (`@Roles`) y Guards para manejar permisos (Owner, Admin, Staff).
+* **Dual API Approach:**
+    * **Backoffice API:** Rutas protegidas para la gestión interna de la tienda.
+    * **Storefront API:** Rutas públicas optimizadas para la vitrina digital, accesibles mediante `slug`.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Framework:** NestJS (Node.js)
+* **Lenguaje:** TypeScript
+* **Base de Datos:** PostgreSQL 15
+* **ORM:** TypeORM
+* **Almacenamiento:** Cloudinary (Imágenes y Assets)
+* **Contenedores:** Docker & Docker Compose
+* **Seguridad:** Passport, JWT, Bcrypt
+
+---
+
+## 🚧 Estado del Proyecto (Roadmap)
+
+El desarrollo se divide en fases. Actualmente completando la **Fase 1 (Backend Core)**.
+
+### ✅ Backend Core (Completado)
+- [x] **Auth Module:** Registro, Login, Hash de contraseñas, JWT Strategy.
+- [x] **Tenancy Module:** Creación automática de Tenants al registrar usuario.
+- [x] **Users Module:** Gestión de staff con roles y seguridad de tenant.
+- [x] **Products Module:** CRUD de productos con filtrado automático por tienda.
+- [x] **Categories Module:** Organización de catálogo.
+- [x] **Inventory Module:** Bitácora de movimientos (IN/OUT) con actualización transaccional de stock.
+- [x] **Uploads Module:** Integración con Cloudinary para subida de imágenes.
+- [x] **StoreConfig Module:** Personalización de marca (Logo, Colores, Info) por tienda.
+- [x] **Storefront Module:** API pública para visualizar productos sin autenticación.
+- [x] **Logging:** Sistema de logs personalizado con contexto.
+
+### ⏳ Pendiente (Próximos pasos)
+- [ ] **Orders Module:** Gestión de pedidos y carritos de compra.
+- [ ] **Subscription Module:** Gestión de planes SaaS (Free, Pro).
+- [ ] **Frontend (Angular):** Desarrollo de la interfaz de usuario (Angular 19/20 + TailwindCSS).
+
+---
+
+## ⚙️ Instalación y Despliegue Local
+
+Sigue estos pasos para levantar el proyecto en tu máquina local.
+
+### 1. Prerrequisitos
+* Node.js (v18 o superior)
+* Docker & Docker Compose
+* Cuenta de Cloudinary (para imágenes)
+
+### 2. Clonar el repositorio
 ```bash
-$ npm install
-```
+git clone [https://github.com/tu-usuario/simpleshop-backend.git](https://github.com/tu-usuario/simpleshop-backend.git)
+cd simpleshop-backend
+3. Configurar Variables de Entorno
+Crea un archivo .env en la raíz del proyecto basándote en el siguiente ejemplo:
 
-## Compile and run the project
+Fragmento de código
 
-```bash
-# development
-$ npm run start
+# APP
+PORT=3000
+NODE_ENV=development
+APP_NAME=SimpleShop
+API_PREFIX=api
 
-# watch mode
-$ npm run start:dev
+# DATABASE (Docker connection)
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_USER=simpleshop
+DATABASE_PASSWORD=dev123
+DATABASE_NAME=simpleshop_dev
+DB_SYNC=true
+DB_LOGGING=true
 
-# production mode
-$ npm run start:prod
-```
+# AUTH (JWT)
+JWT_SECRET=tu_super_secreto_seguro
+JWT_EXPIRES_IN=7d
 
-## Run tests
+# CLOUDINARY (Images)
+CLOUDINARY_CLOUD_NAME=tu_cloud_name
+CLOUDINARY_API_KEY=tu_api_key
+CLOUDINARY_API_SECRET=tu_api_secret
 
-```bash
-# unit tests
-$ npm run test
+4. Levantar Base de Datos (Docker)
+Bash
 
-# e2e tests
-$ npm run test:e2e
+docker-compose up -d
+5. Instalar Dependencias y Correr
+Bash
 
-# test coverage
-$ npm run test:cov
-```
+npm install
+npm run start:dev
+El servidor estará corriendo en: http://localhost:3000/api
 
-## Deployment
+📡 Endpoints Principales
+🔐 Auth & Admin (Privado)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+POST /auth/register - Crear nueva cuenta y tienda.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+POST /auth/login - Obtener JWT.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+POST /products - Crear producto (Tenant inyectado).
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+POST /inventory - Registrar entrada/salida de stock.
 
-## Resources
+POST /uploads - Subir imagen a Cloudinary.
 
-Check out a few resources that may come in handy when working with NestJS:
+PATCH /store-config - Personalizar la tienda.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+🌍 Storefront (Público)
+GET /storefront/:slug - Obtener info de una tienda.
 
-## Support
+GET /storefront/:slug/products - Ver catálogo de una tienda específica.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+👤 Autor
+Oscar - Full Stack Developer LinkedIn | GitHub
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Este proyecto es parte de un portafolio profesional para demostrar dominio en arquitecturas escalables con NestJS.
