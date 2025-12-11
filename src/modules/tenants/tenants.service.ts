@@ -46,11 +46,38 @@ export class TenantsService {
     return this.tenantRepository.findOne({ where: { email } });
   }
 
+  // =================================================================
+  // 👇 NUEVO MÉTODO (SUAVE): Para validaciones internas como el Registro
+  // =================================================================
+  /**
+   * Busca un tenant por slug pero NO lanza error si no existe.
+   * Retorna null si está libre.
+   */
+  async findOneBySlug(slug: string) {
+    return this.tenantRepository.findOne({ where: { slug } });
+  }
+
+  // =================================================================
+  // 👇 MÉTODO EXISTENTE (ESTRICTO): Para la Vitrina Pública
+  // =================================================================
   /**
    * Buscar tenant por su slug (para URLs tipo /:slug)
+   * Lanza error si no existe o si está INACTIVO (Kill Switch).
    */
   async findBySlug(slug: string) {
-    return this.tenantRepository.findOne({ where: { slug } });
+    const tenant = await this.tenantRepository.findOne({ where: { slug } });
+
+    if (!tenant) {
+      throw new NotFoundException(`La tienda "${slug}" no existe`);
+    }
+
+    // Validación de Kill Switch (Tienda desactivada)
+    if (!tenant.isActive) {
+      // Lanzamos 404 para que parezca que la tienda desapareció
+      throw new NotFoundException(`La tienda "${slug}" no está disponible temporalmente.`);
+    }
+
+    return tenant;
   }
 
   /**

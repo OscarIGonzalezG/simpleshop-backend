@@ -15,7 +15,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly tenantsService: TenantsService,
     private readonly jwtService: JwtService,
-    private readonly logger: LoggerService, // ✅ 2. Inyectar Logger
+    private readonly logger: LoggerService,
   ) {}
 
   // =============================
@@ -33,7 +33,7 @@ export class AuthService {
     }
 
     // 2. Validar slug ya existe
-    const existingTenant = await this.tenantsService.findBySlug(dto.slug);
+    const existingTenant = await this.tenantsService.findOneBySlug(dto.slug);
     if (existingTenant) {
       this.logger.warn(`Fallo registro: Slug ${dto.slug} ya existe`, 'AuthService');
       throw new ConflictException('El slug ya está en uso');
@@ -42,9 +42,8 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     // ================================================
-    // Crear usuario OWNER sin tenantId (NO pasar null)
+    // Crear usuario OWNER sin tenantId
     // ================================================
-    // Nota: Aquí se asume que tu UsersService acepta tenantId como opcional
     const user = await this.usersService.create({
       email: dto.email,
       fullname: dto.fullname,
@@ -108,6 +107,7 @@ export class AuthService {
   //            LOGIN
   // =============================
   async login(dto: LoginDto) {
+    // ⚠️ IMPORTANTE: Asegúrate que findByEmail traiga la relación 'tenant'
     const user = await this.usersService.findByEmail(dto.email);
     
     if (!user) {
@@ -122,9 +122,35 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
+    // ==========================================================
+    // 🚫 KILL SWITCH: Validaciones de Estado (NUEVO)
+    // ==========================================================
+
+    // 1. Validar Usuario Activo
+    if (user.isActive === false) {
+      this.logger.warn(`⛔ Acceso denegado (Usuario inactivo): ${user.email}`, 'AuthService');
+      throw new UnauthorizedException('Tu usuario ha sido desactivado. No puedes ingresar.');
+    }
+
     const tenant = user.tenant;
 
-    this.logger.log(`🔑 Usuario logueado: ${user.email} [Tenant: ${tenant?.slug}]`, 'AuthService');
+      // 👇 AGREGA ESTO TEMPORALMENTE
+    console.log('🔍 DEBUG LOGIN:');
+    console.log('User Role:', user.role);
+    console.log('Tenant ID:', tenant?.id);
+    console.log('Tenant IsActive:', tenant?.isActive);
+    console.log('Condición de Bloqueo:', user.role !== 'SUPER_ADMIN' && tenant && tenant.isActive === false);
+    // 👆 -----------------------
+
+    // 2. Validar Tienda Activa (Excepto Super Admin)
+    if (user.role !== UserRole.SUPER_ADMIN && tenant && tenant.isActive === false) {
+      this.logger.warn(`⛔ Acceso denegado (Tienda suspendida): ${user.email} [Tenant: ${tenant.slug}]`, 'AuthService');
+      throw new UnauthorizedException('Tu tienda está suspendida. Contacta a soporte.');
+    }
+
+    // ==========================================================
+
+    this.logger.log(`🔑 Usuario logueado: ${user.email} [Tenant: ${tenant?.slug || 'Sin Tenant'}]`, 'AuthService');
 
     const token = await this.jwtService.signAsync({
       sub: user.id,
@@ -146,6 +172,7 @@ export class AuthService {
             id: tenant.id,
             slug: tenant.slug,
             businessName: tenant.businessName,
+            isActive: tenant.isActive // Opcional: devolver estado
           }
         : null,
     };

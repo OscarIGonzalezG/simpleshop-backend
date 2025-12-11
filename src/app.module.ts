@@ -21,6 +21,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { StorefrontModule } from './modules/storefront/storefront.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { PlatformModule } from './modules/platform/platform.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { OrdersModule } from './modules/orders/orders.module';
     StorefrontModule,
     UploadsModule,
     OrdersModule,
+    PlatformModule,
   ],
 })
 export class AppModule {}
