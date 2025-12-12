@@ -2,7 +2,7 @@ import { Controller, Patch, Param, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../../core/guards/jwt-auth.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { UserRole } from '../users/enums/user-role.enum';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { RequestContextService } from '../../core/request-context/request-context.service';
 

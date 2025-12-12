@@ -6,7 +6,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 import { JwtAuthGuard } from '../../core/guards/jwt-auth.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
-import { UserRole } from './entities/user.entity';
+import { UserRole } from './enums/user-role.enum';
 import { RequestContextService } from '../../core/request-context/request-context.service';
 
 @Controller('users')

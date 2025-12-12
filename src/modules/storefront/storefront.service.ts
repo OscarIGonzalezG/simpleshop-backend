@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Product } from '../products/entities/product.entity';
 import { Category } from '../categories/entities/category.entity';
+import { LoggerService } from '../../core/logger/logger.service'; // 👈
 
 @Injectable()
 export class StorefrontService {
@@ -14,54 +16,47 @@ export class StorefrontService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(Category)
     private readonly categoryRepo: Repository<Category>,
+    private readonly logger: LoggerService, // 👈
   ) {}
 
-  // 1. Buscar la información de la tienda (Para el Header/Branding)
+  // 1. Info Tienda
   async getStoreInfo(slug: string) {
     const tenant = await this.tenantRepo.findOne({
       where: { slug, isActive: true },
-      select: ['id', 'name', 'businessName', 'slug', 'email', 'phone', 'address'], // ⚠️ NO devolver datos sensibles
+      select: ['id', 'name', 'businessName', 'slug', 'email', 'phone', 'address'],
     });
 
-    if (!tenant) throw new NotFoundException('Tienda no encontrada');
+    if (!tenant) {
+      // Log suave para detectar tráfico basura
+      this.logger.warn(`Intento de acceso a tienda inexistente/inactiva: ${slug}`, 'Storefront');
+      throw new NotFoundException('Tienda no encontrada');
+    }
     return tenant;
   }
 
-  // 2. Buscar productos de esa tienda
+  // 2. Productos
   async getProducts(slug: string) {
-    // Primero obtenemos el tenant para saber su ID
     const tenant = await this.getStoreInfo(slug);
-
     return this.productRepo.find({
-      where: { 
-        tenantId: tenant.id, 
-        isActive: true, // Solo mostrar productos activos
-        // stock: MoreThan(0) // Opcional: Si quieres ocultar sin stock
-      },
+      where: { tenantId: tenant.id, isActive: true },
       relations: ['category'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  // 3. Buscar categorías de esa tienda (Para el menú de filtros)
+  // 3. Categorías
   async getCategories(slug: string) {
     const tenant = await this.getStoreInfo(slug);
-    
     return this.categoryRepo.find({
       where: { tenantId: tenant.id, isActive: true },
     });
   }
   
-  // 4. Buscar un producto específico (Detalle de producto)
+  // 4. Detalle Producto
   async getProductBySlug(storeSlug: string, productSlug: string) {
     const tenant = await this.getStoreInfo(storeSlug);
-
     const product = await this.productRepo.findOne({
-      where: { 
-        tenantId: tenant.id, 
-        slug: productSlug,
-        isActive: true 
-      },
+      where: { tenantId: tenant.id, slug: productSlug, isActive: true },
       relations: ['category'],
     });
 

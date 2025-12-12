@@ -6,8 +6,8 @@ import { UsersService } from '../users/users.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { UserRole } from '../users/entities/user.entity';
-import { LoggerService } from '../../core/logger/logger.service'; // ✅ 1. Importar Logger
+import { UserRole } from '../users/enums/user-role.enum'; // Import actualizado
+import { LoggerService } from '../../core/logger/logger.service';
 
 @Injectable()
 export class AuthService {
@@ -18,41 +18,24 @@ export class AuthService {
     private readonly logger: LoggerService,
   ) {}
 
-  // =============================
-  //           REGISTER
-  // =============================
   async register(dto: RegisterDto) {
-    // 📝 Log de inicio
-    this.logger.log(`Intento de registro: ${dto.email} (Empresa: ${dto.businessName})`, 'AuthService');
+    this.logger.log(`Registro iniciado: ${dto.email} [${dto.businessName}]`);
 
-    // 1. Validar email ya existe
+    // 1. Validaciones
     const existingUser = await this.usersService.findByEmail(dto.email);
-    if (existingUser) {
-      this.logger.warn(`Fallo registro: Email ${dto.email} ya existe`, 'AuthService');
-      throw new ConflictException('El email ya está registrado');
-    }
+    if (existingUser) throw new ConflictException('El email ya está registrado');
 
-    // 2. Validar slug ya existe
     const existingTenant = await this.tenantsService.findOneBySlug(dto.slug);
-    if (existingTenant) {
-      this.logger.warn(`Fallo registro: Slug ${dto.slug} ya existe`, 'AuthService');
-      throw new ConflictException('El slug ya está en uso');
-    }
+    if (existingTenant) throw new ConflictException('El slug ya está en uso');
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-    // ================================================
-    // Crear usuario OWNER sin tenantId
-    // ================================================
+    // 2. Crear Usuario (NO HASHEAMOS AQUÍ, LO HACE EL SERVICIO)
     const user = await this.usersService.create({
       email: dto.email,
       fullname: dto.fullname,
-      password: dto.password,
+      password: dto.password, // 👈 Pasamos raw password
     });
 
-    // ================================================
-    // Crear el tenant y asignar OWNER
-    // ================================================
+    // 3. Crear Tenant
     const tenant = await this.tenantsService.create(
       {
         slug: dto.slug,
@@ -66,115 +49,78 @@ export class AuthService {
       user,
     );
 
-    // ================================================
-    // Actualizar usuario con el tenantId real
-    // ================================================
+    // 4. Vincular
     user.tenantId = tenant.id;
     user.role = UserRole.OWNER;
     await this.usersService.save(user);
 
-    // 📝 Log de éxito
-    this.logger.log(`✅ Nuevo Tenant creado: ${tenant.slug} por usuario ${user.email}`, 'AuthService');
+    // 📝 Auditoría
+    await this.logger.audit(
+      'TENANT_REGISTER', 
+      `Nueva tienda: ${tenant.slug}`, 
+      undefined, 
+      { email: user.email }
+    );
 
-    // ================================================
-    // Crear token JWT
-    // ================================================
-    const token = await this.jwtService.signAsync({
-      sub: user.id,
-      email: user.email,
-      tenantId: tenant.id,
-      role: user.role,
-    });
-
-    return {
-      access_token: token,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullname: user.fullname,
-        role: user.role,
-      },
-      tenant: {
-        id: tenant.id,
-        slug: tenant.slug,
-        businessName: tenant.businessName,
-        plan: tenant.plan,
-      },
-    };
+    return this.generateAuthResponse(user, tenant);
   }
 
-  // =============================
-  //            LOGIN
-  // =============================
   async login(dto: LoginDto) {
-    // ⚠️ IMPORTANTE: Asegúrate que findByEmail traiga la relación 'tenant'
     const user = await this.usersService.findByEmail(dto.email);
     
     if (!user) {
-      this.logger.warn(`⚠️ Login fallido (Usuario no existe): ${dto.email}`, 'AuthService');
+      this.logger.warn(`Login fallido (User not found): ${dto.email}`);
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
     const isValid = await bcrypt.compare(dto.password, user.password);
-    
     if (!isValid) {
-      this.logger.warn(`⚠️ Login fallido (Password incorrecto): ${dto.email}`, 'AuthService');
+      this.logger.warn(`Login fallido (Bad pass): ${dto.email}`);
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // ==========================================================
-    // 🚫 KILL SWITCH: Validaciones de Estado (NUEVO)
-    // ==========================================================
-
-    // 1. Validar Usuario Activo
-    if (user.isActive === false) {
-      this.logger.warn(`⛔ Acceso denegado (Usuario inactivo): ${user.email}`, 'AuthService');
-      throw new UnauthorizedException('Tu usuario ha sido desactivado. No puedes ingresar.');
-    }
-
+    // --- KILL SWITCH ---
     const tenant = user.tenant;
 
-      // 👇 AGREGA ESTO TEMPORALMENTE
-    console.log('🔍 DEBUG LOGIN:');
-    console.log('User Role:', user.role);
-    console.log('Tenant ID:', tenant?.id);
-    console.log('Tenant IsActive:', tenant?.isActive);
-    console.log('Condición de Bloqueo:', user.role !== 'SUPER_ADMIN' && tenant && tenant.isActive === false);
-    // 👆 -----------------------
-
-    // 2. Validar Tienda Activa (Excepto Super Admin)
-    if (user.role !== UserRole.SUPER_ADMIN && tenant && tenant.isActive === false) {
-      this.logger.warn(`⛔ Acceso denegado (Tienda suspendida): ${user.email} [Tenant: ${tenant.slug}]`, 'AuthService');
-      throw new UnauthorizedException('Tu tienda está suspendida. Contacta a soporte.');
+    if (user.isActive === false) {
+      await this.logger.security('AUTH_BLOCKED', `Login bloqueado (Usuario inactivo): ${user.email}`);
+      throw new UnauthorizedException('Usuario desactivado');
     }
 
-    // ==========================================================
+    if (user.role !== UserRole.SUPER_ADMIN && tenant && tenant.isActive === false) {
+      await this.logger.security('AUTH_BLOCKED', `Login bloqueado (Tienda inactiva): ${tenant.slug}`);
+      throw new UnauthorizedException('Tu tienda está suspendida');
+    }
 
-    this.logger.log(`🔑 Usuario logueado: ${user.email} [Tenant: ${tenant?.slug || 'Sin Tenant'}]`, 'AuthService');
+    // 📝 Auditoría Login
+    await this.logger.security('AUTH_LOGIN', `Sesión iniciada: ${user.email}`);
 
-    const token = await this.jwtService.signAsync({
+    return this.generateAuthResponse(user, tenant);
+  }
+
+  private async generateAuthResponse(user: any, tenant: any) {
+    const payload = {
       sub: user.id,
       email: user.email,
       tenantId: tenant?.id,
       role: user.role,
-    });
+    };
 
     return {
-      access_token: token,
+      access_token: await this.jwtService.signAsync(payload),
       user: {
         id: user.id,
         email: user.email,
         fullname: user.fullname,
         role: user.role,
       },
-      tenant: tenant
-        ? {
-            id: tenant.id,
-            slug: tenant.slug,
-            businessName: tenant.businessName,
-            isActive: tenant.isActive // Opcional: devolver estado
-          }
-        : null,
+      tenant: tenant ? {
+        id: tenant.id,
+        slug: tenant.slug,
+        businessName: tenant.businessName,
+        isActive: tenant.isActive,
+        plan: tenant.plan,
+      } : null,
     };
   }
 }

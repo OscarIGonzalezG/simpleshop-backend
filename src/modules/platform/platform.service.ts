@@ -1,76 +1,82 @@
-import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+
+
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { User } from '../users/entities/user.entity';
+import { UserRole } from '../users/enums/user-role.enum';
 import { Order } from '../orders/entities/order.entity';
+import { SystemLog } from 'src/core/logger/entities/system-log.entity';
+import { LoggerService } from '../../core/logger/logger.service'; // 👈
 
 @Injectable()
 export class PlatformService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly logger: LoggerService,
+
+    // 👇 Inyectamos el repositorio de Logs
+    @InjectRepository(SystemLog)
+    private readonly logRepo: Repository<SystemLog>,
+  ) {}
 
   async getGlobalMetrics() {
-    // Usamos query builder o managers para contar TODO
-    
-    // 1. Total de Tiendas
     const totalTenants = await this.dataSource.getRepository(Tenant).count();
-    
-    // 2. Total de Usuarios Registrados
     const totalUsers = await this.dataSource.getRepository(User).count();
-
-    // 3. Dinero Total Movido (Suma de todas las ventas de todos los tenants)
-    const { totalRevenue } = await this.dataSource
-      .getRepository(Order)
+    const { totalRevenue } = await this.dataSource.getRepository(Order)
       .createQueryBuilder('order')
       .select('SUM(order.total)', 'totalRevenue')
       .where('order.status = :status', { status: 'COMPLETED' })
       .getRawOne();
-
-    // 4. Últimas 5 tiendas creadas (Log de actividad reciente)
+      
     const recentTenants = await this.dataSource.getRepository(Tenant).find({
       order: { createdAt: 'DESC' },
       take: 5,
     });
 
-    return {
-      totalTenants,
-      totalUsers,
-      totalRevenue: totalRevenue || 0,
-      recentTenants
-    };
+    return { totalTenants, totalUsers, totalRevenue: totalRevenue || 0, recentTenants };
   }
 
-  // 1. Obtener todas las tiendas
   async getAllTenants() {
-    return this.dataSource.getRepository(Tenant).find({
-      order: { createdAt: 'DESC' },
-    });
+    return this.dataSource.getRepository(Tenant).find({ order: { createdAt: 'DESC' } });
   }
 
-  // 2. Obtener todos los usuarios
   async getAllUsers() {
-    return this.dataSource.getRepository(User).find({
-      order: { createdAt: 'DESC' },
-      relations: ['tenant'], // Para ver a qué tienda pertenecen
+    return this.dataSource.getRepository(User).find({ order: { createdAt: 'DESC' }, relations: ['tenant'] });
+  }
+
+  // 👇 NUEVO MÉTODO: Obtener logs del sistema
+  async getAllLogs() {
+    return this.logRepo.find({
+      order: { createdAt: 'DESC' }, // Los más recientes primero
+      take: 100, // Límite de 100 para no saturar la pantalla
     });
   }
 
-  // 3. Activar/Desactivar Tienda (Banear)
+  // 🛡️ KILL SWITCH MANUAL
   async toggleTenantStatus(id: string) {
     const tenantRepo = this.dataSource.getRepository(Tenant);
-    const tenant = await tenantRepo.findOneBy({ id });
+    const tenant = await tenantRepo.findOne({ where: { id }, relations: ['owner'] });
     
-    if (tenant) {
-      console.log(`🔄 TOGGLE ANTES: ${tenant.businessName} estaba ${tenant.isActive}`); // 👈 Log 1
-      
-      tenant.isActive = !tenant.isActive; // Invertir valor
-      
-      const saved = await tenantRepo.save(tenant);
-      console.log(`✅ TOGGLE DESPUÉS: Ahora está ${saved.isActive}`); // 👈 Log 2
-      
-      return saved;
+    if (!tenant) throw new NotFoundException('Tenant no encontrado');
+
+    // Protección Anti-Suicidio (No bloquear al Super Admin)
+    if (tenant.owner && tenant.owner.role === UserRole.SUPER_ADMIN) {
+      this.logger.warn(`Intento de bloquear tienda Super Admin: ${tenant.slug}`);
+      throw new ForbiddenException('No puedes desactivar la tienda principal.');
     }
-    
-    console.warn(`❌ No se encontró el tenant ${id} para desactivar`);
-    return null;
+
+    tenant.isActive = !tenant.isActive;
+    const saved = await tenantRepo.save(tenant);
+
+    // 📝 Auditoría
+    const status = saved.isActive ? 'ACTIVADO' : 'SUSPENDIDO';
+    await this.logger.security(
+      'TENANT_STATUS_CHANGE', 
+      `Tienda ${saved.slug} ha sido ${status} manualmente.`
+    );
+
+    return saved;
   }
 }

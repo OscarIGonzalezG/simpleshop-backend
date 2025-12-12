@@ -1,52 +1,32 @@
-import { Module, MiddlewareConsumer, RequestMethod, NestModule, Global } from '@nestjs/common';
-import { APP_INTERCEPTOR, APP_FILTER, APP_GUARD } from '@nestjs/core';
-import { TypeOrmModule } from '@nestjs/typeorm'; // 👈 Importar TypeOrmModule
+import { Module, MiddlewareConsumer, NestModule, Global } from '@nestjs/common';
+import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
-// Entidades
-import { SystemLog } from './logger/entities/system-log.entity'; // 👈 Importar la entidad SystemLog
-
-// Filtros globales
+import { SystemLog } from './logger/entities/system-log.entity';
 import { GlobalExceptionFilter } from './filters/global-exception.filter';
-
-// Request context
 import { RequestContextService } from './request-context/request-context.service';
 import { RequestContextMiddleware } from './request-context/request-context.middleware';
-
-// Logger
 import { LoggerService } from './logger/logger.service';
 import { LoggerInterceptor } from './logger/logger.interceptor';
 
-// Guards
-//import { RolesGuard } from './guards/roles.guard';
-
-@Global() // 👈 RECOMENDACIÓN: Agrega @Global() para no tener que importar CoreModule en cada feature
+@Global()
 @Module({
   imports: [
-    // 👇 ESTO FALTABA: Habilitar la inyección del repositorio SystemLog en este módulo
-    TypeOrmModule.forFeature([SystemLog]), 
+    TypeOrmModule.forFeature([SystemLog]), // 👈 ¡CRUCIAL!
   ],
   providers: [
-    // Servicios
     RequestContextService,
     LoggerService,
-
-    // Interceptor global (Logger HTTP)
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggerInterceptor,
     },
-
-    // Filtro global
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
     },
   ],
-  exports: [
-    RequestContextService, 
-    LoggerService,
-    TypeOrmModule // Opcional: exportar TypeOrm si otros servicios del core lo necesitaran
-  ],
+  exports: [RequestContextService, LoggerService, TypeOrmModule],
 })
 export class CoreModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

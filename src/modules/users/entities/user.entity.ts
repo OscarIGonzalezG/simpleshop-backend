@@ -1,12 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn, Index, JoinColumn, } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn, Index, JoinColumn } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-
-export enum UserRole {
-  OWNER = 'owner',
-  ADMIN = 'admin',
-  STAFF = 'staff',
-  SUPER_ADMIN = 'SUPER_ADMIN',
-}
+// 👇 IMPORTANTE: Importamos el Enum, NO lo definimos aquí
+import { UserRole } from '../enums/user-role.enum';
 
 @Entity('users')
 export class User {
@@ -33,16 +28,11 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
-  /**
-   * MULTITENANT
-   */
   @Index()
   @Column({ type: 'uuid', nullable: true })
   tenantId?: string | null;
   
-  @ManyToOne(() => Tenant, (tenant) => tenant.users, {
-    onDelete: 'CASCADE',
-  })
+  @ManyToOne(() => Tenant, (tenant) => tenant.users, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tenantId' })
   tenant: Tenant;
 

@@ -6,103 +6,66 @@ import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { User } from '../users/entities/user.entity';
+import { LoggerService } from '../../core/logger/logger.service';
+import { LogLevel } from '../../core/logger/enums/log-level.enum'; // 👈 IMPORTANTE
 
 @Injectable()
 export class TenantsService {
   constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    private readonly logger: LoggerService,
   ) {}
 
-  /**
-   * Crear un Tenant (normalmente llamado desde AuthService)
-   */
   async create(dto: CreateTenantDto, owner: User) {
-    const tenant = this.tenantRepository.create({
-      ...dto,
-      owner,
-    });
-
+    const tenant = this.tenantRepository.create({ ...dto, owner });
     return this.tenantRepository.save(tenant);
   }
 
-  /**
-   * Buscar un tenant por ID
-   */
   async findOne(id: string) {
     const tenant = await this.tenantRepository.findOne({ where: { id } });
-
-    if (!tenant) {
-      throw new NotFoundException('Tenant no encontrado');
-    }
-
+    if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return tenant;
   }
 
-  /**
-   * Buscar tenant por email
-   */
   async findByEmail(email: string) {
     return this.tenantRepository.findOne({ where: { email } });
   }
 
-  // =================================================================
-  // 👇 NUEVO MÉTODO (SUAVE): Para validaciones internas como el Registro
-  // =================================================================
-  /**
-   * Busca un tenant por slug pero NO lanza error si no existe.
-   * Retorna null si está libre.
-   */
   async findOneBySlug(slug: string) {
     return this.tenantRepository.findOne({ where: { slug } });
   }
 
-  // =================================================================
-  // 👇 MÉTODO EXISTENTE (ESTRICTO): Para la Vitrina Pública
-  // =================================================================
-  /**
-   * Buscar tenant por su slug (para URLs tipo /:slug)
-   * Lanza error si no existe o si está INACTIVO (Kill Switch).
-   */
   async findBySlug(slug: string) {
     const tenant = await this.tenantRepository.findOne({ where: { slug } });
-
-    if (!tenant) {
-      throw new NotFoundException(`La tienda "${slug}" no existe`);
-    }
-
-    // Validación de Kill Switch (Tienda desactivada)
+    if (!tenant) throw new NotFoundException(`La tienda "${slug}" no existe`);
+    
     if (!tenant.isActive) {
-      // Lanzamos 404 para que parezca que la tienda desapareció
+      this.logger.warn(`Intento de acceso a tienda bloqueada: ${slug}`);
       throw new NotFoundException(`La tienda "${slug}" no está disponible temporalmente.`);
     }
-
     return tenant;
   }
 
-  /**
-   * Actualizar tenant
-   */
   async update(id: string, dto: UpdateTenantDto) {
     const tenant = await this.findOne(id);
-
     Object.assign(tenant, dto);
-
-    return this.tenantRepository.save(tenant);
+    const updated = await this.tenantRepository.save(tenant);
+    
+    // 👇 CORRECCIÓN: LogLevel.INFO
+    this.logger.audit('TENANT_UPDATE', `Tienda actualizada: ${tenant.slug}`, LogLevel.INFO);
+    return updated;
   }
 
-  /**
-   * Eliminar tenant completamente
-   */
   async remove(id: string) {
     const tenant = await this.findOne(id);
-
-    return this.tenantRepository.remove(tenant);
+    await this.tenantRepository.remove(tenant);
+    
+    // 👇 CORRECCIÓN: LogLevel.WARN
+    this.logger.audit('TENANT_DELETE', `Tienda eliminada: ${tenant.slug}`, LogLevel.WARN);
+    return { success: true };
   }
 
-  /**
-   * Listar todos los tenants
-   */
   async findAll() {
     return this.tenantRepository.find();
   }

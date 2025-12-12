@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+
+// DTOs & Entities
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order, OrderStatus } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
@@ -7,9 +9,16 @@ import { Product } from '../../modules/products/entities/product.entity';
 import { Tenant } from '../../modules/tenants/entities/tenant.entity';
 import { InventoryMovement, MovementType } from '../../modules/inventory/entities/inventory-movement.entity';
 
+// Core
+import { LoggerService } from '../../core/logger/logger.service'; // 👈 Importar
+import { LogLevel } from '../../core/logger/enums/log-level.enum';
+
 @Injectable()
 export class OrdersService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly logger: LoggerService, // 👈 Inyectar
+  ) {}
 
   // 🛒 CREAR ORDEN (Público - Desde el Storefront)
   async createOrder(tenantSlug: string, dto: CreateOrderDto) {
@@ -18,37 +27,32 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Obtener el Tenant por Slug
+      // 1. Validar Tienda
       const tenant = await queryRunner.manager.findOne(Tenant, {
         where: { slug: tenantSlug, isActive: true },
       });
-
-      if (!tenant) throw new NotFoundException('Tienda no encontrada');
+      if (!tenant) throw new NotFoundException('Tienda no disponible');
 
       let totalAmount = 0;
       const orderItems: OrderItem[] = [];
 
-      // 2. Procesar cada item
+      // 2. Procesar Items y Stock
       for (const itemDto of dto.items) {
-        // Buscar producto (con bloqueo pesimista opcional, aquí simple)
         const product = await queryRunner.manager.findOne(Product, {
           where: { id: itemDto.productId, tenantId: tenant.id, isActive: true },
         });
 
-        if (!product) {
-          throw new NotFoundException(`Producto ${itemDto.productId} no encontrado o no disponible`);
-        }
-
-        // Validar Stock
+        if (!product) throw new NotFoundException(`Producto ${itemDto.productId} no disponible`);
+        
         if (product.stock < itemDto.quantity) {
-          throw new BadRequestException(`Stock insuficiente para el producto: ${product.name}`);
+          throw new BadRequestException(`Stock insuficiente para: ${product.name}`);
         }
 
         // Descontar Stock
         product.stock -= itemDto.quantity;
         await queryRunner.manager.save(product);
 
-        // Registrar Movimiento de Inventario (OUT)
+        // Movimiento de Inventario (OUT)
         const movement = queryRunner.manager.create(InventoryMovement, {
           tenantId: tenant.id,
           productId: product.id,
@@ -58,85 +62,97 @@ export class OrdersService {
         });
         await queryRunner.manager.save(movement);
 
-        // Crear OrderItem
+        // Crear Item de Orden
         const orderItem = new OrderItem();
         orderItem.product = product;
         orderItem.quantity = itemDto.quantity;
-        orderItem.price = product.price; // Precio congelado
+        orderItem.price = product.price; // Snapshot del precio
         orderItems.push(orderItem);
 
         totalAmount += Number(product.price) * itemDto.quantity;
       }
 
-      // 3. Crear la Orden
+      // 3. Guardar Orden
       const order = queryRunner.manager.create(Order, {
         tenantId: tenant.id,
         customerName: dto.customerName,
         customerEmail: dto.customerEmail,
         customerPhone: dto.customerPhone,
         total: totalAmount,
-        status: OrderStatus.COMPLETED, // O PENDING si integras pagos luego
+        status: OrderStatus.COMPLETED,
         items: orderItems,
       });
 
       const savedOrder = await queryRunner.manager.save(order);
 
       await queryRunner.commitTransaction();
+
+      // 📝 AUDITORÍA DE VENTA
+      this.logger.audit(
+        'ORDER_CREATE', 
+        `Venta realizada #${savedOrder.id.slice(0, 8)} - Total: $${totalAmount}`, 
+        LogLevel.INFO,
+        { tenantId: tenant.id, orderId: savedOrder.id }
+      );
+
       return savedOrder;
 
     } catch (error) {
       await queryRunner.rollbackTransaction();
+      this.logger.error(`Error procesando orden: ${error.message}`, error.stack, 'OrdersService');
       throw error;
     } finally {
       await queryRunner.release();
     }
   }
 
-  // 🔄 CANCELAR ORDEN (Admin - Desde el Backoffice)
+  // 🔄 CANCELAR ORDEN (Admin - Backoffice)
   async cancelOrder(orderId: string, tenantId: string, userId: string) {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // 1. Buscar la orden con sus items
       const order = await queryRunner.manager.findOne(Order, {
         where: { id: orderId, tenantId },
         relations: ['items', 'items.product'], 
       });
 
       if (!order) throw new NotFoundException('Orden no encontrada');
+      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('Orden ya cancelada');
 
-      if (order.status === OrderStatus.CANCELLED) {
-        throw new BadRequestException('La orden ya está cancelada');
-      }
-
-      // 2. Reponer Stock y Registrar Movimientos
+      // Restaurar Stock
       for (const item of order.items) {
         const product = item.product;
-
-        // A. Devolver Stock
         product.stock += item.quantity;
         await queryRunner.manager.save(product);
 
-        // B. Registrar Movimiento (IN)
+        // Movimiento IN (Devolución)
         const movement = queryRunner.manager.create(InventoryMovement, {
           tenantId,
           productId: product.id,
-          type: MovementType.IN, // 👈 Entrada por devolución
+          type: MovementType.IN,
           quantity: item.quantity,
           comment: `Cancelación Orden #${order.id.slice(0, 8)}`,
-          userId, // El admin que canceló
+          userId,
         });
         await queryRunner.manager.save(movement);
       }
 
-      // 3. Actualizar Estado de la Orden
       order.status = OrderStatus.CANCELLED;
       await queryRunner.manager.save(order);
 
       await queryRunner.commitTransaction();
-      return { message: 'Orden cancelada y stock restaurado', orderId: order.id };
+
+      // 📝 AUDITORÍA DE CANCELACIÓN
+      this.logger.audit(
+        'ORDER_CANCEL', 
+        `Orden cancelada #${order.id.slice(0, 8)}. Stock restaurado.`, 
+        LogLevel.WARN,
+        { tenantId, orderId }
+      );
+
+      return { message: 'Orden cancelada y stock restaurado' };
 
     } catch (error) {
       await queryRunner.rollbackTransaction();

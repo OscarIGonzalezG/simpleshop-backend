@@ -1,5 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
-import { LogLevel } from '../enums/log-level.enum'; // 👈 Importamos desde el archivo separado
+import { LogLevel } from '../enums/log-level.enum';
 
 @Entity()
 export class SystemLog {
@@ -15,15 +15,12 @@ export class SystemLog {
   @Column({ type: 'text' })
   message: string;
 
-  // Datos contextuales (Vienen del RequestContext)
+  // Datos contextuales
   @Column({ nullable: true })
   userId: string;
 
   @Column({ nullable: true })
   tenantId: string;
-
-  @Column({ nullable: true })
-  ip: string;
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
