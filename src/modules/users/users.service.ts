@@ -4,11 +4,11 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
 import { User } from './entities/user.entity';
-import { UserRole } from './enums/user-role.enum'; // 👈 Importar Enum
+import { UserRole } from './enums/user-role.enum';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoggerService } from '../../core/logger/logger.service';
-import { LogLevel } from 'src/core/logger/enums/log-level.enum'; // 👈 Importar LogLevel
+import { LogLevel } from 'src/core/logger/enums/log-level.enum';
 
 @Injectable()
 export class UsersService {
@@ -26,12 +26,12 @@ export class UsersService {
       password: hashedPassword,
       tenantId: tenantId ?? undefined,
       role,
+      isActive: true, // Por defecto activo al crear
     });
 
     const savedUser = await this.userRepo.save(user);
 
     if (tenantId) {
-      // 👇 CORRECCIÓN: Usar LogLevel.INFO
       this.logger.audit('USER_CREATE', `Nuevo usuario creado: ${savedUser.email}`, LogLevel.INFO);
     }
 
@@ -52,10 +52,18 @@ export class UsersService {
   async findById(id: string): Promise<User> {
     const user = await this.userRepo.findOne({
       where: { id },
-      relations: ['tenant'],
+      relations: ['tenant'], // Traer tenant es útil para el panel
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     return user;
+  }
+
+  // 👇 NUEVO: Listar todos (Global)
+  async findAllGlobal(): Promise<User[]> {
+    return this.userRepo.find({
+        order: { createdAt: 'DESC' },
+        relations: ['tenant'],
+    });
   }
 
   async findAllByTenant(tenantId: string): Promise<User[]> {
@@ -74,15 +82,12 @@ export class UsersService {
   async updateByTenant(id: string, dto: UpdateUserDto, tenantId: string) {
     const user = await this.findOneByTenant(id, tenantId);
 
-    // 👇 Ahora 'role' existe en dto gracias a PartialType
     if (user.role === UserRole.OWNER && dto.role && dto.role !== UserRole.OWNER) {
       throw new ForbiddenException('No puedes degradar al dueño de la tienda');
     }
 
-    // 👇 Ahora 'password' existe en dto
     if (dto.password) {
       dto.password = await bcrypt.hash(dto.password, 10);
-      // 👇 CORRECCIÓN: Usar LogLevel.INFO
       this.logger.audit('USER_PASSWORD_CHANGE', `Password cambiado para: ${user.email}`, LogLevel.INFO);
     }
 
@@ -95,8 +100,41 @@ export class UsersService {
     if (user.role === UserRole.OWNER) throw new ForbiddenException('No puedes eliminar al dueño');
     
     await this.userRepo.remove(user);
-    // 👇 CORRECCIÓN: Usar LogLevel.WARN
     this.logger.audit('USER_DELETE', `Usuario eliminado: ${user.email}`, LogLevel.WARN);
+    
+    return { success: true };
+  }
+
+  // 👇 LÓGICA KILL SWITCH
+  async updateStatus(id: string, isActive: boolean) {
+    const user = await this.userRepo.findOneBy({ id });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    // Seguridad: No te puedes bloquear a ti mismo si eres Super Admin (opcional pero recomendado)
+    if (user.role === UserRole.SUPER_ADMIN && !isActive) {
+        // Podrías permitirlo, pero cuidado con quedarte fuera
+    }
+
+    user.isActive = isActive;
+    const saved = await this.userRepo.save(user);
+    
+    // Auditamos el cambio
+    const action = isActive ? 'USER_UNBLOCK' : 'USER_BLOCK';
+    this.logger.audit(action, `Estado de usuario ${user.email} cambiado a: ${isActive}`, LogLevel.WARN);
+
+    return saved;
+  }
+
+  // 👇 LÓGICA ADMIN RESET
+  async adminResetPassword(id: string, newPass: string) {
+    const user = await this.userRepo.findOneBy({ id });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const salt = await bcrypt.genSalt();
+    user.password = await bcrypt.hash(newPass, salt);
+
+    await this.userRepo.save(user);
+    this.logger.audit('ADMIN_RESET_PASS', `Admin reseteó pass de: ${user.email}`, LogLevel.SECURITY);
     
     return { success: true };
   }

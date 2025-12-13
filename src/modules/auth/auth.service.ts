@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
@@ -6,7 +6,7 @@ import { UsersService } from '../users/users.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { UserRole } from '../users/enums/user-role.enum'; // Import actualizado
+import { UserRole } from '../users/enums/user-role.enum';
 import { LoggerService } from '../../core/logger/logger.service';
 
 @Injectable()
@@ -28,11 +28,11 @@ export class AuthService {
     const existingTenant = await this.tenantsService.findOneBySlug(dto.slug);
     if (existingTenant) throw new ConflictException('El slug ya está en uso');
 
-    // 2. Crear Usuario (NO HASHEAMOS AQUÍ, LO HACE EL SERVICIO)
+    // 2. Crear Usuario
     const user = await this.usersService.create({
       email: dto.email,
       fullname: dto.fullname,
-      password: dto.password, // 👈 Pasamos raw password
+      password: dto.password,
     });
 
     // 3. Crear Tenant
@@ -54,12 +54,12 @@ export class AuthService {
     user.role = UserRole.OWNER;
     await this.usersService.save(user);
 
-    // 📝 Auditoría
+    // 📝 Auditoría Registro
     await this.logger.audit(
       'TENANT_REGISTER', 
       `Nueva tienda: ${tenant.slug}`, 
       undefined, 
-      { email: user.email }
+      { email: user.email, tenantId: tenant.id }
     );
 
     return this.generateAuthResponse(user, tenant);
@@ -68,34 +68,67 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
     
+    // Warn: Login fallido (User not found)
     if (!user) {
-      this.logger.warn(`Login fallido (User not found): ${dto.email}`);
+      this.logger.warn(`Login fallido (User not found)`, 'AuthService', { email: dto.email });
       throw new UnauthorizedException('Credenciales inválidas');
     }
+
+    // 🔍 DEBUG: Verificamos qué ve el Backend
+    console.log(`🔍 DEBUG LOGIN: Usuario ${user.email} | isActive en BD:`, user.isActive);
 
     const isValid = await bcrypt.compare(dto.password, user.password);
+    
+    // Warn: Login fallido (Bad password)
     if (!isValid) {
-      this.logger.warn(`Login fallido (Bad pass): ${dto.email}`);
+      this.logger.warn(`Login fallido (Bad pass)`, 'AuthService', { email: dto.email });
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // --- KILL SWITCH ---
+    // --- KILL SWITCH REFORZADO 🛡️ ---
+    // Usamos !user.isActive para atrapar false, null o undefined
+    if (!user.isActive) {
+      await this.logger.security('AUTH_BLOCKED', 'Login bloqueado (Usuario inactivo)', { email: user.email });
+      throw new UnauthorizedException('⛔ Usuario desactivado por administración');
+    }
+
     const tenant = user.tenant;
 
-    if (user.isActive === false) {
-      await this.logger.security('AUTH_BLOCKED', `Login bloqueado (Usuario inactivo): ${user.email}`);
-      throw new UnauthorizedException('Usuario desactivado');
+    // Validación de Tienda
+    if (user.role !== UserRole.SUPER_ADMIN && tenant && !tenant.isActive) {
+      await this.logger.security('AUTH_BLOCKED', 'Login bloqueado (Tienda inactiva)', { email: user.email, tenant: tenant.slug });
+      throw new UnauthorizedException('⛔ Tu tienda está suspendida');
     }
 
-    if (user.role !== UserRole.SUPER_ADMIN && tenant && tenant.isActive === false) {
-      await this.logger.security('AUTH_BLOCKED', `Login bloqueado (Tienda inactiva): ${tenant.slug}`);
-      throw new UnauthorizedException('Tu tienda está suspendida');
-    }
-
-    // 📝 Auditoría Login
-    await this.logger.security('AUTH_LOGIN', `Sesión iniciada: ${user.email}`);
+    // ✅ ÉXITO
+    await this.logger.security(
+      'AUTH_LOGIN', 
+      'Sesión iniciada correctamente', 
+      { 
+        email: user.email, 
+        role: user.role, 
+        tenantId: tenant?.id || 'N/A' 
+      }
+    );
 
     return this.generateAuthResponse(user, tenant);
+  }
+
+  // 👇 LÓGICA DE IMPERSONATION (MAGIA PURA)
+  async impersonate(userId: string) {
+    const user = await this.usersService.findById(userId);
+
+    if (!user) throw new NotFoundException('Usuario objetivo no encontrado');
+
+    // ⛔ SEGURIDAD: Impedir impersonar a otro Super Admin
+    if (user.role === UserRole.SUPER_ADMIN) {
+        throw new ForbiddenException('No puedes suplantar a otro Super Administrador');
+    }
+
+    // 📝 Auditoría importante
+    this.logger.security('AUTH_IMPERSONATE', `Super Admin inició Modo Fantasma como: ${user.email}`);
+
+    return this.generateAuthResponse(user, user.tenant);
   }
 
   private async generateAuthResponse(user: any, tenant: any) {

@@ -19,9 +19,14 @@ export class SystemLog {
   @Column({ nullable: true })
   userId: string;
 
+  // 👇 AGREGADO: Necesario para que el Dashboard muestre "admin@admin.cl"
+  @Column({ nullable: true })
+  userEmail: string;
+
   @Column({ nullable: true })
   tenantId: string;
 
+  // Aquí guardaremos el 'payload' (el JSON que causó el error)
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
 

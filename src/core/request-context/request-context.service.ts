@@ -3,22 +3,10 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 
 /**
- *
  * RequestContextService
- *
- * Maneja un almacenamiento contextual por request
- * utilizando AsyncLocalStorage.
- *
- * Permite guardar y leer datos como:
- * - requestId
- * - userId
- * - tenantId
- * - role
- * - cualquier otro valor relevante
- *
- * API híbrida:
- *  - Métodos flexibles: set(key, value), get(key)
- *  - Getters limpios: requestId, userId, tenantId, role
+ * * Versión: Singleton (Sin Scope.REQUEST)
+ * Esto permite que servicios globales como LoggerService accedan al contexto
+ * sin errores de inicialización.
  */
 @Injectable()
 export class RequestContextService {
@@ -98,5 +86,12 @@ export class RequestContextService {
    */
   get role(): string | undefined {
     return this.get<string>('role');
+  }
+
+  /**
+   * 👇 Getter estándar: user (Objeto completo)
+   */
+  get user(): any | undefined {
+    return this.get<any>('user');
   }
 }
