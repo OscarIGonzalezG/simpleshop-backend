@@ -33,7 +33,7 @@ export class Tenant {
   @Column({ type: 'uuid' })
   ownerId: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'ownerId' })
   owner: User;
 

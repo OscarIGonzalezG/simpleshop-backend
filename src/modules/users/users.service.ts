@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { User } from './entities/user.entity';
 import { UserRole } from './enums/user-role.enum';
@@ -12,6 +13,9 @@ import { LogLevel } from 'src/core/logger/enums/log-level.enum';
 
 @Injectable()
 export class UsersService {
+// Creamos un logger interno para el Cron
+  private readonly systemLogger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -26,7 +30,7 @@ export class UsersService {
       password: hashedPassword,
       tenantId: tenantId ?? undefined,
       role,
-      isActive: true, // Por defecto activo al crear
+      isActive: true, 
     });
 
     const savedUser = await this.userRepo.save(user);
@@ -52,13 +56,12 @@ export class UsersService {
   async findById(id: string): Promise<User> {
     const user = await this.userRepo.findOne({
       where: { id },
-      relations: ['tenant'], // Traer tenant es útil para el panel
+      relations: ['tenant'], 
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     return user;
   }
 
-  // 👇 NUEVO: Listar todos (Global)
   async findAllGlobal(): Promise<User[]> {
     return this.userRepo.find({
         order: { createdAt: 'DESC' },
@@ -105,27 +108,23 @@ export class UsersService {
     return { success: true };
   }
 
-  // 👇 LÓGICA KILL SWITCH
   async updateStatus(id: string, isActive: boolean) {
     const user = await this.userRepo.findOneBy({ id });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    // Seguridad: No te puedes bloquear a ti mismo si eres Super Admin (opcional pero recomendado)
     if (user.role === UserRole.SUPER_ADMIN && !isActive) {
-        // Podrías permitirlo, pero cuidado con quedarte fuera
+        // Lógica opcional para super admin
     }
 
     user.isActive = isActive;
     const saved = await this.userRepo.save(user);
     
-    // Auditamos el cambio
     const action = isActive ? 'USER_UNBLOCK' : 'USER_BLOCK';
     this.logger.audit(action, `Estado de usuario ${user.email} cambiado a: ${isActive}`, LogLevel.WARN);
 
     return saved;
   }
 
-  // 👇 LÓGICA ADMIN RESET
   async adminResetPassword(id: string, newPass: string) {
     const user = await this.userRepo.findOneBy({ id });
     if (!user) throw new NotFoundException('Usuario no encontrado');
@@ -138,4 +137,33 @@ export class UsersService {
     
     return { success: true };
   }
+
+  // 👇 MODIFICACIÓN IMPORTANTE AQUÍ 👇
+  // Cron Job que ignora la zona horaria de tu PC y usa la de la Base de Datos
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleCron() {
+    
+    // this.systemLogger.debug('⏰ Verificando usuarios expirados (DB Time)...');
+
+    // Usamos createQueryBuilder para ejecutar SQL directo
+    const result = await this.userRepo.createQueryBuilder()
+      .delete()
+      .from(User)
+      .where("isVerified = :verified", { verified: false })
+      // 👇 TRUCO: NOW() usa la hora de la BD. 
+      // Si usas PostgreSQL:
+      .andWhere("createdAt < NOW() - INTERVAL '24 hours'")
+      
+      // ⚠️ Si estuvieras usando MySQL, descomenta la línea de abajo y comenta la de arriba:
+      // .andWhere("createdAt < DATE_SUB(NOW(), INTERVAL 24 HOUR)")
+      
+      .execute();
+
+    if (result.affected && result.affected > 0) {
+      this.systemLogger.warn(`🔥 LIMPIEZA EXITOSA: Se eliminaron ${result.affected} cuentas no verificadas.`);
+    }
+  } catch (error) {
+        // 👇 ESTE TAMBIÉN ES IMPORTANTE (Solo avisa si falló)
+        this.systemLogger.error(`❌ Error en Cron Job: ${error.message}`);
+    } 
 }

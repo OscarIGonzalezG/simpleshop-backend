@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -24,6 +24,23 @@ export class AuthController {
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  // ===========================
+  //       VERIFY ACCOUNT
+  // ===========================
+  @Post('verify')
+  verifyAccount(@Body() dto: { email: string, code: string }) {
+    return this.authService.verifyEmail(dto);
+  }
+
+  // ===========================
+  //      RESEND CODE
+  // ===========================
+  @Post('resend')
+  @HttpCode(HttpStatus.OK)
+  async resendCode(@Body() body: { email: string }) {
+    return this.authService.resendCode(body.email);
   }
 
   // 👇 NUEVO: ENDPOINT DE IMPERSONATION (MODO FANTASMA)

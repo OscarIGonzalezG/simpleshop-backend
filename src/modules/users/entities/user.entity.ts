@@ -28,6 +28,13 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
+  // 👇 NUEVOS CAMPOS
+  @Column({ default: false }) 
+  isVerified: boolean; // ¿Confirmó su correo?
+
+  @Column({ type: 'varchar', nullable: true })
+  verificationCode: string | null; // El código de 6 dígitos (ej: "123456")
+
   @Index()
   @Column({ type: 'uuid', nullable: true })
   tenantId?: string | null;

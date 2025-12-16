@@ -3,6 +3,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+// Scheduling (tareas programadas)
+import { ScheduleModule } from '@nestjs/schedule';
+
+// Mailer (para el envío de correos)
+import { MailerModule } from '@nestjs-modules/mailer'; //
+
 // Configs
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
@@ -25,6 +31,10 @@ import { PlatformModule } from './modules/platform/platform.module';
 
 @Module({
   imports: [
+    /**
+     * Scheduling Module (para tareas programadas)
+     */
+    ScheduleModule.forRoot(),
     /**
      * Global config for the entire app
      */
@@ -51,6 +61,21 @@ import { PlatformModule } from './modules/platform/platform.module';
         synchronize: dbConfig.synchronize,
         logging: dbConfig.logging,
       }),
+    }),
+
+    MailerModule.forRoot({
+      transport: {
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true, // true para 465, false para otros puertos
+        auth: {
+          user: 'ozkrgonzalez1201@gmail.com', // ⚠️ PON TU GMAIL AQUÍ
+          pass: 'krzr erlt qgmf aaif',      // ⚠️ PON LA CONTRASEÑA DE APLICACIÓN AQUÍ
+        },
+      },
+      defaults: {
+        from: '"SimpleShop Security" <no-reply@simpleshop.com>',
+      },
     }),
 
     /**
