@@ -94,4 +94,20 @@ export class RequestContextService {
   get user(): any | undefined {
     return this.get<any>('user');
   }
+
+  // 👇👇 NUEVOS GETTERS PARA LOGS DE INTELIGENCIA 👇👇
+
+  /**
+   * Getter para la IP del cliente (guardada por el middleware)
+   */
+  get ip(): string | undefined {
+    return this.get<string>('ip');
+  }
+
+  /**
+   * Getter para el User Agent (Navegador/Dispositivo)
+   */
+  get userAgent(): string | undefined {
+    return this.get<string>('userAgent');
+  }
 }

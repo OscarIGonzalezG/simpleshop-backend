@@ -26,6 +26,20 @@ export class SystemLog {
   @Column({ nullable: true })
   tenantId: string;
 
+  // 👇👇 NUEVAS COLUMNAS (Inteligencia) 👇👇
+  @Column({ nullable: true })
+  ip: string;
+
+  @Column({ nullable: true, length: 5 }) 
+  country: string; // Ej: "CL"
+
+  @Column({ nullable: true }) 
+  device: string; // Ej: "Chrome on Windows"
+
+  @Column({ type: 'text', nullable: true })
+  userAgent: string; // User Agent crudo
+  // 👆👆 FIN NUEVAS COLUMNAS 👆👆
+
   // Aquí guardaremos el 'payload' (el JSON que causó el error)
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;

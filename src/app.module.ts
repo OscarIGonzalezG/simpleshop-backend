@@ -3,6 +3,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+// Guard global de bloqueo de IPs
+import { APP_GUARD } from '@nestjs/core';
+import { IpBlockGuard } from './core/guards/ip-block/ip-block.guard';
+
 // Scheduling (tareas programadas)
 import { ScheduleModule } from '@nestjs/schedule';
 
@@ -28,6 +32,7 @@ import { StorefrontModule } from './modules/storefront/storefront.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { SecurityModule } from './modules/security/security.module';
 
 @Module({
   imports: [
@@ -96,6 +101,14 @@ import { PlatformModule } from './modules/platform/platform.module';
     UploadsModule,
     OrdersModule,
     PlatformModule,
+    SecurityModule,
+  ],
+
+  providers: [
+    {
+      provide: APP_GUARD,      // Esto le dice a NestJS: "Usa este Guard en TODAS las rutas"
+      useClass: IpBlockGuard,  // La clase de nuestro escudo
+    },
   ],
 })
 export class AppModule {}
