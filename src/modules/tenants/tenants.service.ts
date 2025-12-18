@@ -11,19 +11,29 @@ import { LogLevel } from '../../core/logger/enums/log-level.enum'; // 👈 IMPOR
 
 @Injectable()
 export class TenantsService {
-  constructor(
+constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
     private readonly logger: LoggerService,
   ) {}
 
   async create(dto: CreateTenantDto, owner: User) {
+    // Forzamos creación del slug si no viene (simple slugify)
+    if (!dto.slug) {
+        dto.slug = dto.name.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
+    }
     const tenant = this.tenantRepository.create({ ...dto, owner });
-    return this.tenantRepository.save(tenant);
+    const saved = await this.tenantRepository.save(tenant);
+    
+    this.logger.audit('TENANT_CREATE', `Nueva tienda creada: ${saved.name} (${saved.slug})`, LogLevel.INFO);
+    return saved;
   }
 
   async findOne(id: string) {
-    const tenant = await this.tenantRepository.findOne({ where: { id } });
+    const tenant = await this.tenantRepository.findOne({ 
+        where: { id },
+        relations: ['owner'] // 👈 Traemos al dueño también aquí
+    });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return tenant;
   }
@@ -52,8 +62,20 @@ export class TenantsService {
     Object.assign(tenant, dto);
     const updated = await this.tenantRepository.save(tenant);
     
-    // 👇 CORRECCIÓN: LogLevel.INFO
     this.logger.audit('TENANT_UPDATE', `Tienda actualizada: ${tenant.slug}`, LogLevel.INFO);
+    return updated;
+  }
+
+  // 👇 NUEVO MÉTODO: CAMBIAR ESTADO (ACTIVO/SUSPENDIDO)
+  async updateStatus(id: string, isActive: boolean) {
+    const tenant = await this.findOne(id);
+    tenant.isActive = isActive;
+    const updated = await this.tenantRepository.save(tenant);
+
+    const action = isActive ? 'TENANT_ACTIVATE' : 'TENANT_SUSPEND';
+    const level = isActive ? LogLevel.INFO : LogLevel.WARN;
+    
+    this.logger.audit(action, `Estado de tienda ${tenant.slug} cambiado a: ${isActive}`, level);
     return updated;
   }
 
@@ -61,12 +83,14 @@ export class TenantsService {
     const tenant = await this.findOne(id);
     await this.tenantRepository.remove(tenant);
     
-    // 👇 CORRECCIÓN: LogLevel.WARN
     this.logger.audit('TENANT_DELETE', `Tienda eliminada: ${tenant.slug}`, LogLevel.WARN);
     return { success: true };
   }
 
   async findAll() {
-    return this.tenantRepository.find();
+    return this.tenantRepository.find({
+        relations: ['owner'], // 👈 ¡CLAVE! Trae al usuario dueño
+        order: { createdAt: 'DESC' } // Las más nuevas primero
+    });
   }
 }
