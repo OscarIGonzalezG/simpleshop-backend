@@ -17,54 +17,43 @@ export class AuthService {
     private readonly tenantsService: TenantsService,
     private readonly jwtService: JwtService,
     private readonly logger: LoggerService,
-    private readonly mailService: MailerService, // 👈 INYECTADO
+    private readonly mailService: MailerService, 
   ) {}
 
-// 1. REGISTER
+  // 1. REGISTER (MODIFICADO: Solo Usuario)
   async register(dto: RegisterDto) {
-    this.logger.log(`Registro iniciado: ${dto.email} [${dto.businessName}]`);
+    this.logger.log(`Registro iniciado: ${dto.email}`);
 
+    // 1. Validar Email
     const existingUser = await this.usersService.findByEmail(dto.email);
     if (existingUser) throw new ConflictException('El email ya está registrado');
 
-    const existingTenant = await this.tenantsService.findOneBySlug(dto.slug);
-    if (existingTenant) throw new ConflictException('El slug ya está en uso');
-
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // 2. Crear Usuario (SIN TENANT)
     const user = await this.usersService.create({
       email: dto.email,
       fullname: dto.fullname,
       password: dto.password,
     });
 
-    const tenant = await this.tenantsService.create(
-      {
-        slug: dto.slug,
-        businessName: dto.businessName,
-        name: dto.businessName,
-        email: dto.email,
-        plan: dto.plan,
-        maxUsers: 1,
-        maxStorageMB: 500,
-      },
-      user,
-    );
-
-    user.tenantId = tenant.id;
-    user.role = UserRole.OWNER;
+    // 3. Configurar Usuario Inicial
+    user.role = UserRole.USER; // Nace como usuario normal hasta que cree tienda
     user.verificationCode = code;
     user.isVerified = false;
+    user.tenantId = null; // Explícitamente sin tenant
     
     await this.usersService.save(user);
 
+    // 4. Auditoría
     await this.logger.audit(
-      'TENANT_REGISTER', 
-      `Nueva tienda: ${tenant.slug}`, 
+      'USER_REGISTER', 
+      `Nuevo usuario registrado: ${user.email}`, 
       undefined, 
-      { email: user.email, tenantId: tenant.id }
+      { email: user.email }
     );
 
+    // 5. Enviar Correo
     try {
       await this.mailService.sendMail({
         to: user.email,
@@ -91,24 +80,20 @@ export class AuthService {
     };
   }
 
-  // 2. RESEND CODE (Con corrección de Zona Horaria y Cooldown de 30s)
+  // 2. RESEND CODE (Se mantiene igual)
   async resendCode(email: string) {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (user.isVerified) throw new BadRequestException('Esta cuenta ya está verificada');
 
-    // --- ⏳ LÓGICA DE COOLDOWN INTELIGENTE ---
     const lastUpdate = user.updatedAt ? new Date(user.updatedAt).getTime() : 0;
     const now = new Date().getTime();
     
-    // Calculamos diferencia
     let timeDiff = now - lastUpdate;
-
-    // PARCHE DE ZONA HORARIA: Si es negativo (futuro), asumimos que se puede enviar.
     if (timeDiff < 0) timeDiff = 1000000; 
 
-    const cooldownTime = 30 * 1000; // 30 SEGUNDOS
+    const cooldownTime = 30 * 1000; 
 
     if (timeDiff < cooldownTime) {
       const remainingSeconds = Math.ceil((cooldownTime - timeDiff) / 1000);
@@ -119,7 +104,7 @@ export class AuthService {
 
     user.verificationCode = newCode;
     user.updatedAt = new Date(); 
-    user.createdAt = new Date(); // Reinicia la vida ante el Cron Job
+    user.createdAt = new Date(); 
     
     await this.usersService.save(user);
 
@@ -145,7 +130,7 @@ export class AuthService {
     return { message: 'Código reenviado correctamente' };
   }
 
-  // 3. VERIFY EMAIL (Esto soluciona el error TS2339)
+  // 3. VERIFY EMAIL (Se mantiene igual)
   async verifyEmail(dto: { email: string, code: string }) {
     const user = await this.usersService.findByEmail(dto.email);
     
@@ -164,17 +149,14 @@ export class AuthService {
     user.verificationCode = null as any; 
     await this.usersService.save(user);
 
-    // 👇👇 AGREGA ESTE LOG AQUÍ 👇👇
     this.logger.log(`✅ Cuenta verificada exitosamente: ${user.email}`);
-    
-    // (Opcional) Si usas auditoría también:
     this.logger.audit('AUTH_VERIFY', 'Cuenta verificada exitosamente', undefined, { email: user.email });
 
     const tenant = user.tenant; 
     return this.generateAuthResponse(user, tenant);
   }
 
-  // 4. LOGIN (Corregido para redirección)
+  // 4. LOGIN (Se mantiene igual)
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
     
@@ -190,14 +172,12 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // --- 🛡️ AQUÍ ESTÁ EL CAMBIO CLAVE ---
     if (!user.isVerified) {
       this.logger.warn(`Login bloqueado (No verificado)`, 'AuthService', { email: dto.email });
       
-      // CAMBIO IMPORTANTE: Usamos 'code' en lugar de 'error'
       throw new UnauthorizedException({
         message: 'Debes verificar tu correo electrónico antes de iniciar sesión.',
-        code: 'ACCOUNT_NOT_VERIFIED', // 👈 ESTO ARREGLA LA REDIRECCIÓN
+        code: 'ACCOUNT_NOT_VERIFIED', 
         email: user.email 
       });
     }
@@ -207,6 +187,7 @@ export class AuthService {
       throw new UnauthorizedException('⛔ Usuario desactivado por administración');
     }
 
+    // Nota: user.tenant puede ser NULL ahora (si aún no creó tienda)
     const tenant = user.tenant;
 
     if (user.role !== UserRole.SUPER_ADMIN && tenant && !tenant.isActive) {
@@ -220,14 +201,14 @@ export class AuthService {
       { 
         email: user.email, 
         role: user.role, 
-        tenantId: tenant?.id || 'N/A' 
+        tenantId: tenant?.id || 'NO_TENANT' // Marcamos que no tiene tienda aún
       }
     );
 
     return this.generateAuthResponse(user, tenant);
   }
 
-  // 5. IMPERSONATE
+  // 5. IMPERSONATE (Se mantiene igual)
   async impersonate(userId: string) {
     const user = await this.usersService.findById(userId);
 
@@ -246,7 +227,7 @@ export class AuthService {
     const payload = {
       sub: user.id,
       email: user.email,
-      tenantId: tenant?.id,
+      tenantId: tenant?.id, // Puede ser null
       role: user.role,
     };
 
@@ -258,6 +239,7 @@ export class AuthService {
         fullname: user.fullname,
         role: user.role,
       },
+      // Tenant puede ser null, eso le dirá al Frontend que muestre la pantalla "Crear Tienda"
       tenant: tenant ? {
         id: tenant.id,
         slug: tenant.slug,

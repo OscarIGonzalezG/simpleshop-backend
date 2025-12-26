@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -6,33 +6,80 @@ import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { User } from '../users/entities/user.entity';
+import { UserRole } from '../users/enums/user-role.enum';
 import { LoggerService } from '../../core/logger/logger.service';
 import { LogLevel } from '../../core/logger/enums/log-level.enum'; // 👈 IMPORTANTE
 
 @Injectable()
 export class TenantsService {
-constructor(
+  constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    
+    // 👇 NUEVO: Inyectamos el repositorio de usuarios para poder actualizarlos
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+
     private readonly logger: LoggerService,
   ) {}
 
   async create(dto: CreateTenantDto, owner: User) {
-    // Forzamos creación del slug si no viene (simple slugify)
+    
+    // --- 🛡️ 1. VALIDACIÓN DE LÍMITES (FREE TIER) ---
+    // Definimos límites simples (esto podría venir de variables de entorno)
+    const LIMITS = { FREE: 1, PRO: 5, ENTERPRISE: 999 };
+    
+    // Contamos cuántas tiendas tiene ya este usuario
+    const currentStoresCount = await this.tenantRepository.count({ 
+        where: { owner: { id: owner.id } } 
+    });
+
+    // Asumimos FREE si no tiene plan definido en el usuario (ajustar según tu modelo)
+    const userPlan = (owner as any).plan || 'FREE'; 
+    const maxAllowed = LIMITS[userPlan] || LIMITS.FREE;
+
+    if (currentStoresCount >= maxAllowed) {
+      this.logger.warn(`Usuario ${owner.email} intentó exceder límite de tiendas (${currentStoresCount}/${maxAllowed})`);
+      throw new ForbiddenException(
+        `Has alcanzado el límite de tiendas de tu plan ${userPlan} (${currentStoresCount}/${maxAllowed}).`
+      );
+    }
+    // ------------------------------------------------
+
+    // Generación de Slug
     if (!dto.slug) {
         dto.slug = dto.name.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
     }
+
+    // Validar que el slug no exista (para evitar error 500 de SQL)
+    const existingSlug = await this.findOneBySlug(dto.slug);
+    if (existingSlug) {
+        throw new ForbiddenException(`La URL "${dto.slug}" ya está en uso por otra tienda.`);
+    }
+
+    // Crear y guardar la tienda
     const tenant = this.tenantRepository.create({ ...dto, owner });
-    const saved = await this.tenantRepository.save(tenant);
+    const savedTenant = await this.tenantRepository.save(tenant);
     
-    this.logger.audit('TENANT_CREATE', `Nueva tienda creada: ${saved.name} (${saved.slug})`, LogLevel.INFO);
-    return saved;
+    // --- ✨ 2. ASCENSO AUTOMÁTICO (USER -> OWNER) ---
+    // Si el usuario era un simple "USER" y crea su tienda, lo ascendemos
+    if (owner.role === UserRole.USER) {
+        owner.role = UserRole.OWNER;
+        owner.tenant = savedTenant; // Asignamos esta tienda como su contexto principal
+        
+        await this.userRepository.save(owner);
+        this.logger.log(`🆙 Usuario ${owner.email} ascendido a OWNER tras crear su primera tienda.`);
+    }
+    // ------------------------------------------------
+
+    this.logger.audit('TENANT_CREATE', `Nueva tienda creada: ${savedTenant.name} (${savedTenant.slug})`, LogLevel.INFO);
+    return savedTenant;
   }
 
   async findOne(id: string) {
     const tenant = await this.tenantRepository.findOne({ 
         where: { id },
-        relations: ['owner'] // 👈 Traemos al dueño también aquí
+        relations: ['owner'] 
     });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return tenant;
@@ -66,7 +113,6 @@ constructor(
     return updated;
   }
 
-  // 👇 NUEVO MÉTODO: CAMBIAR ESTADO (ACTIVO/SUSPENDIDO)
   async updateStatus(id: string, isActive: boolean) {
     const tenant = await this.findOne(id);
     tenant.isActive = isActive;
@@ -89,8 +135,8 @@ constructor(
 
   async findAll() {
     return this.tenantRepository.find({
-        relations: ['owner'], // 👈 ¡CLAVE! Trae al usuario dueño
-        order: { createdAt: 'DESC' } // Las más nuevas primero
+        relations: ['owner'], 
+        order: { createdAt: 'DESC' }
     });
   }
 }

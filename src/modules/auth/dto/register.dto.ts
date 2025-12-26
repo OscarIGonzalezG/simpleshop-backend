@@ -1,8 +1,7 @@
-import { IsEmail, IsString, MinLength, MaxLength, IsEnum } from 'class-validator';
-import { TenantPlan } from '../../tenants/enums/tenant-plan.enum';
+import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
 
 export class RegisterDto {
-  // ---------- USER ----------
+  // ---------- USER (Solo esto pediremos al principio) ----------
   @IsEmail()
   email: string;
 
@@ -13,16 +12,4 @@ export class RegisterDto {
   @IsString()
   @MaxLength(120)
   fullname: string;
-
-  // ---------- TENANT ----------
-  @IsString()
-  @MaxLength(80)
-  slug: string;
-
-  @IsString()
-  @MaxLength(120)
-  businessName: string;
-
-  @IsEnum(TenantPlan)
-  plan: TenantPlan;
 }
