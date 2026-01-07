@@ -7,11 +7,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { IpBlockGuard } from './core/guards/ip-block/ip-block.guard';
 
-// Scheduling (tareas programadas)
+// Scheduling
 import { ScheduleModule } from '@nestjs/schedule';
 
-// Mailer (para el envío de correos)
-import { MailerModule } from '@nestjs-modules/mailer'; //
+// Mailer
+import { MailerModule } from '@nestjs-modules/mailer';
 
 // Configs
 import appConfig from './config/app.config';
@@ -21,37 +21,40 @@ import databaseConfig from './config/database.config';
 // Core
 import { CoreModule } from './core/core.module';
 
-// Feature modules
-import { AuthModule } from './modules/auth/auth.module';
-import { UsersModule } from './modules/users/users.module';
-import { TenantsModule } from './modules/tenants/tenants.module';
-import { ProductsModule } from './modules/products/products.module';
-import { CategoriesModule } from './modules/categories/categories.module';
-import { InventoryModule } from './modules/inventory/inventory.module';
-import { StorefrontModule } from './modules/storefront/storefront.module';
-import { UploadsModule } from './modules/uploads/uploads.module';
-import { OrdersModule } from './modules/orders/orders.module';
-import { PlatformModule } from './modules/platform/platform.module';
-import { SecurityModule } from './modules/security/security.module';
+// =========================================================
+// 🏗️ DOMAIN MODULES (Nueva Arquitectura)
+// =========================================================
+
+// 1. IAM (Identity & Access Management)
+import { AuthModule } from './modules/iam/auth/auth.module';
+import { UsersModule } from './modules/iam/users/users.module';
+
+// 2. SaaS (Platform Management)
+import { TenantsModule } from './modules/saas/tenants/tenants.module';
+import { PlatformModule } from './modules/saas/platform/platform.module';
+import { SecurityModule } from './modules/saas/security/security.module';
+
+// 3. COMMERCE (Store Engine)
+import { ProductsModule } from './modules/commerce/products/products.module';
+import { CategoriesModule } from './modules/commerce/categories/categories.module';
+import { InventoryModule } from './modules/commerce/inventory/inventory.module';
+import { OrdersModule } from './modules/commerce/orders/orders.module';
+import { StorefrontModule } from './modules/commerce/storefront/storefront.module';
+
+// 4. SHARED (Common Utilities)
+import { UploadsModule } from './modules/shared/uploads/uploads.module';
 
 @Module({
   imports: [
-    /**
-     * Scheduling Module (para tareas programadas)
-     */
+    // --- INFRASTRUCTURE ---
     ScheduleModule.forRoot(),
-    /**
-     * Global config for the entire app
-     */
+    
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, authConfig, databaseConfig], // <── IMPORTANTE
+      load: [appConfig, authConfig, databaseConfig],
       envFilePath: '.env',
     }),
 
-    /**
-     * Database (TypeORM)
-     */
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [databaseConfig.KEY],
@@ -72,10 +75,10 @@ import { SecurityModule } from './modules/security/security.module';
       transport: {
         host: 'smtp.gmail.com',
         port: 465,
-        secure: true, // true para 465, false para otros puertos
+        secure: true,
         auth: {
-          user: 'ozkrgonzalez1201@gmail.com', // ⚠️ PON TU GMAIL AQUÍ
-          pass: 'krzr erlt qgmf aaif',      // ⚠️ PON LA CONTRASEÑA DE APLICACIÓN AQUÍ
+          user: 'ozkrgonzalez1201@gmail.com', 
+          pass: 'krzr erlt qgmf aaif',      
         },
       },
       defaults: {
@@ -83,31 +86,35 @@ import { SecurityModule } from './modules/security/security.module';
       },
     }),
 
-    /**
-     * Core system (request context, logger)
-     */
+    // --- CORE SYSTEM ---
     CoreModule,
 
-    /**
-     * Business modules
-     */
+    // --- FEATURE MODULES (Organized) ---
+    
+    // IAM
     AuthModule,
     UsersModule,
+
+    // SaaS
     TenantsModule,
+    PlatformModule,
+    SecurityModule,
+
+    // Commerce
     ProductsModule,
     CategoriesModule,
     InventoryModule,
-    StorefrontModule,
-    UploadsModule,
     OrdersModule,
-    PlatformModule,
-    SecurityModule,
+    StorefrontModule,
+
+    // Shared
+    UploadsModule,
   ],
 
   providers: [
     {
-      provide: APP_GUARD,      // Esto le dice a NestJS: "Usa este Guard en TODAS las rutas"
-      useClass: IpBlockGuard,  // La clase de nuestro escudo
+      provide: APP_GUARD,
+      useClass: IpBlockGuard,
     },
   ],
 })

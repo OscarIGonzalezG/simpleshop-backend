@@ -1,5 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { SecurityService } from '../../../modules/security/security.service';
+import { SecurityService } from '../../../modules/saas/security/security.service';
 import * as requestIp from 'request-ip';
 
 @Injectable()
