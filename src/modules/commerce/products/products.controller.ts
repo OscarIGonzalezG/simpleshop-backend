@@ -3,8 +3,8 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
-import { BaseTenantController } from '../../../core/base/base-tenant.controller'; // Ajusta ruta
-import { JwtAuthGuard } from '../../../core/guards/jwt-auth.guard'; // Ajusta ruta
+import { BaseTenantController } from '../../../core/base/base-tenant.controller';
+import { JwtAuthGuard } from '../../../core/guards/jwt-auth.guard';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard) // 🔒 Protegemos todo el controlador
@@ -17,6 +17,6 @@ export class ProductsController extends BaseTenantController<
     super(productsService);
   }
   
-  // ¡Y YA ESTÁ!
-  // Tienes POST, GET, PATCH, DELETE automáticos heredados de BaseTenantController.
+  // La lógica de "POST create" heredada llamará al service,
+  // y el service lanzará el error si supera los 50 productos.
 }

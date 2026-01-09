@@ -3,8 +3,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadsService } from './uploads.service';
 import { JwtAuthGuard } from '../../../core/guards/jwt-auth.guard';
 
+
 @Controller('uploads')
-@UseGuards(JwtAuthGuard) // 🔒 Seguridad: Nadie anónimo sube archivos
+@UseGuards(JwtAuthGuard) // 🔒 Seguridad base
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 
@@ -14,7 +15,7 @@ export class UploadsController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          // Límite: 2MB (ajusta según tu plan de Cloudinary)
+          // Límite por archivo individual (2MB está bien para frontend, pero el Guard revisa el total)
           new MaxFileSizeValidator({ maxSize: 1024 * 1024 * 2 }), 
           // Tipo: Solo imágenes comunes
           new FileTypeValidator({ fileType: '.(png|jpeg|jpg|webp)' }),

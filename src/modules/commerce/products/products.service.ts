@@ -1,27 +1,45 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common'; // 👈 Importar ForbiddenException
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { Product } from './entities/product.entity';
 import { BaseTenantService } from '../../../core/base/base-tenant.service';
 import { RequestContextService } from '../../../core/request-context/request-context.service';
-import { LoggerService } from '../../../core/logger/logger.service'; // 👈
+import { LoggerService } from '../../../core/logger/logger.service'; 
 import { LogLevel } from '../../../core/logger/enums/log-level.enum';
+import { Tenant } from 'src/modules/saas/tenants/entities/tenant.entity'; // 👈 Importar Tenant
+import { TenantPlan } from 'src/modules/saas/tenants/enums/tenant-plan.enum'; // 👈 Importar Enum Plan
 
 @Injectable()
 export class ProductsService extends BaseTenantService<Product> {
   constructor(
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    @InjectRepository(Tenant) // 👈 Inyectar Repo de Tenant para ver el plan
+    private readonly tenantRepo: Repository<Tenant>,
     context: RequestContextService,
-    private readonly logger: LoggerService, // 👈
+    private readonly logger: LoggerService,
   ) {
     super(productRepo, context);
   }
 
-  // --- CRUD con Auditoría ---
+  // --- CRUD con Auditoría y Límite Freemium ---
 
   async createForCurrentTenant(data: any): Promise<Product> {
+    // 1. 👇 VALIDACIÓN FREEMIUM: Límite de 50 Productos
+    const tenantId = this.currentTenantId;
+    const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+
+    if (tenant && tenant.plan === TenantPlan.FREE) {
+      const currentProducts = await this.productRepo.count({ where: { tenantId } });
+      if (currentProducts >= 50) {
+        throw new ForbiddenException(
+          'Has alcanzado el límite de 50 productos del Plan Gratis. Actualiza tu plan para seguir creciendo.'
+        );
+      }
+    }
+
+    // 2. Creación normal
     const product = await super.createForCurrentTenant(data);
     this.logger.audit('PRODUCT_CREATE', `Producto creado: ${product.name} (${product.slug})`);
     return product;

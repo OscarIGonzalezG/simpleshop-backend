@@ -56,6 +56,10 @@ export class Tenant {
   @Column({ type: 'int', default: 500 })
   maxStorageMB: number;
 
+  // 👇 NUEVO: CONTADOR DE USO ACTUAL (Inicia en 0)
+  @Column({ type: 'float', default: 0 }) 
+  currentStorageUsedMB: number;
+
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, any>;
 
